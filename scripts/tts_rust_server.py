@@ -50,6 +50,28 @@ async def receive_messages(websocket: websockets.ClientConnection, output_queue)
     await output_queue.put(None)  # Signal end of audio
 
 
+async def send_text_words(websocket: websockets.ClientConnection, text: str, word_delay: float = 2.0, words_per_batch: int = 5):
+    """Send text in batches of words with delays."""
+    words = text.split()
+    total_batches = (len(words) + words_per_batch - 1) // words_per_batch  # Ceiling division
+    print(f"Sending {len(words)} words in {total_batches} batches of {words_per_batch} words each, with {word_delay}s delay between batches...")
+    
+    for i in range(0, len(words), words_per_batch):
+        batch = words[i:i + words_per_batch]
+        batch_text = " ".join(batch) + " "
+        batch_num = (i // words_per_batch) + 1
+        
+        print(f"Sending batch {batch_num}/{total_batches}: '{batch_text.strip()}'")
+        await websocket.send(msgpack.packb({"type": "Text", "text": batch_text}))
+        
+        # Add delay between batches (except after the last batch)
+        if i + words_per_batch < len(words):
+            await asyncio.sleep(word_delay)
+    
+    print("Sending EOS signal...")
+    await websocket.send(msgpack.packb({"type": "Eos"}))
+
+
 async def output_audio(out: str, output_queue: asyncio.Queue[np.ndarray | None]):
     if out == "-":
         should_exit = False
@@ -90,7 +112,7 @@ async def output_audio(out: str, output_queue: asyncio.Queue[np.ndarray | None])
 
 
 async def websocket_client():
-    parser = argparse.ArgumentParser(description="Use the TTS streaming API")
+    parser = argparse.ArgumentParser(description="Use the TTS streaming API with word-by-word input")
     parser.add_argument("inp", type=str, help="Input file, use - for stdin.")
     parser.add_argument(
         "out", type=str, help="Output file to generate, use - for playing the audio"
@@ -107,13 +129,25 @@ async def websocket_client():
         default="ws://127.0.0.1:8080",
     )
     parser.add_argument("--api-key", default="public_token")
+    parser.add_argument(
+        "--word-delay",
+        type=float,
+        default=2.0,
+        help="Delay in seconds between sending each batch of words (default: 2.0)"
+    )
+    parser.add_argument(
+        "--words-per-batch",
+        type=int,
+        default=5,
+        help="Number of words to send in each batch (default: 5)"
+    )
     args = parser.parse_args()
 
     params = {"voice": args.voice, "format": "PcmMessagePack"}
     uri = f"{args.url}/api/tts_streaming?{urlencode(params)}"
     print(uri)
 
-    # TODO: stream the text instead of sending it all at once
+    # Read input text
     if args.inp == "-":
         if sys.stdin.isatty():  # Interactive
             print("Enter text to synthesize (Ctrl+D to end input):")
@@ -125,13 +159,16 @@ async def websocket_client():
     headers = {"kyutai-api-key": args.api_key}
 
     async with websockets.connect(uri, additional_headers=headers) as websocket:
-        await websocket.send(msgpack.packb({"type": "Text", "text": text_to_tts}))
-        await websocket.send(msgpack.packb({"type": "Eos"}))
-
+        # Create output queue for audio
         output_queue = asyncio.Queue()
+        
+        # Start all tasks concurrently
+        send_task = asyncio.create_task(send_text_words(websocket, text_to_tts, args.word_delay, args.words_per_batch))
         receive_task = asyncio.create_task(receive_messages(websocket, output_queue))
         output_audio_task = asyncio.create_task(output_audio(args.out, output_queue))
-        await asyncio.gather(receive_task, output_audio_task)
+        
+        # Wait for all tasks to complete
+        await asyncio.gather(send_task, receive_task, output_audio_task)
 
 
 if __name__ == "__main__":

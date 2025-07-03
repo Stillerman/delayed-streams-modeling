@@ -39,6 +39,38 @@ DEFAULT_DSM_TTS_VOICE_REPO = "kyutai/tts-voices"
 AUTH_TOKEN = "public_token"
 
 
+def list_audio_devices():
+    """List available audio output devices"""
+    print("Available audio output devices:")
+    devices = sd.query_devices()
+    for i, device in enumerate(devices):
+        if device['max_output_channels'] > 0:  # Only show output devices
+            print(f"  {i}: {device['name']} (max channels: {device['max_output_channels']})")
+    return devices
+
+
+def select_audio_device():
+    """Interactive device selection"""
+    devices = list_audio_devices()
+    
+    while True:
+        try:
+            choice = input("\nEnter device number (or press Enter for default): ").strip()
+            if not choice:
+                return None  # Use default device
+            
+            device_id = int(choice)
+            if 0 <= device_id < len(devices) and devices[device_id]['max_output_channels'] > 0:
+                return device_id
+            else:
+                print("Invalid device number or device doesn't support output. Please try again.")
+        except ValueError:
+            print("Please enter a valid number.")
+        except KeyboardInterrupt:
+            print("\nExiting...")
+            exit(0)
+
+
 class STSPipeline:
     def __init__(self, args):
         self.args = args
@@ -47,6 +79,9 @@ class STSPipeline:
         self.text_queue = asyncio.Queue()
         self.audio_block_queue = queue.Queue()
         self.should_exit = False
+        
+        # Select audio output device
+        self.output_device = select_audio_device() if args.select_device else args.device
         
         # Initialize STT model
         self.init_stt_model()
@@ -209,6 +244,7 @@ class STSPipeline:
             blocksize=1920,
             channels=1,
             callback=audio_output_callback,
+            device=self.output_device,
         ):
             while not should_exit_playback and not self.should_exit:
                 await asyncio.sleep(0.1)
@@ -280,8 +316,28 @@ async def main():
         default="ws://213.173.108.203:17594",
     )
     parser.add_argument("--api-key", default="public_token")
+    parser.add_argument(
+        "--select-device",
+        action="store_true",
+        help="Interactively select audio output device at startup"
+    )
+    parser.add_argument(
+        "--device",
+        type=int,
+        help="Audio output device ID (use --list-devices to see available devices)"
+    )
+    parser.add_argument(
+        "--list-devices",
+        action="store_true",
+        help="List available audio devices and exit"
+    )
     
     args = parser.parse_args()
+    
+    # Handle --list-devices option
+    if args.list_devices:
+        list_audio_devices()
+        return
     
     pipeline = STSPipeline(args)
     await pipeline.run()

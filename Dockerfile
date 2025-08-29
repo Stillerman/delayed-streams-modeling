@@ -27,7 +27,7 @@
         cp dsm/configs/config-tts.toml /build/configs/
     
     # ---------- Runtime (RunPod) ----------
-    FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-runtime-ubuntu22.04
+    FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04
     
     ENV DEBIAN_FRONTEND=noninteractive
     # python3-pip is present on most tags, but install if missing:

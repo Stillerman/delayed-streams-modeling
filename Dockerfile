@@ -16,6 +16,9 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 ENV CUDA_HOME=/usr/local/cuda
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
 
+ARG CUDA_COMPUTE_CAP=86
+ENV CUDA_COMPUTE_CAP=${CUDA_COMPUTE_CAP}
+
 # Build moshi-server with CUDA
 RUN cargo install --features cuda moshi-server
 
